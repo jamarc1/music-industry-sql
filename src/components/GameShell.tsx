@@ -1,0 +1,378 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { motion } from "framer-motion";
+import { useGameStore } from "@/store/gameStore";
+import { getMissionById, MISSIONS } from "@/lib/missions";
+import { runQuery, warmDb } from "@/lib/duckdb";
+import { useDbStatus } from "@/hooks/useDbStatus";
+import { useKeyedState } from "@/hooks/useKeyedState";
+import { playSound } from "@/lib/sound";
+import { nextFillerLine, nextReflectionLine } from "@/lib/dialogue";
+import { CLUE_CATALOG } from "@/lib/clues";
+import { TABLE_SCHEMAS } from "@/lib/seedData";
+import ChiefDialogue from "./ChiefDialogue";
+import CurrentMissionCard from "./CurrentMissionCard";
+import WitnessFile from "./WitnessFile";
+import ChiefReactionDisplay from "./ChiefReactionDisplay";
+import SqlEditor from "./SqlEditor";
+import ResultsGrid from "./ResultsGrid";
+import XPBar from "./XPBar";
+import ProgressBar from "./ProgressBar";
+import BadgeCase from "./BadgeCase";
+import InvestigationBoard from "./InvestigationBoard";
+import SoundToggle from "./SoundToggle";
+
+export default function GameShell() {
+  const currentMissionId = useGameStore((s) => s.currentMissionId);
+  const currentTaskIndex = useGameStore((s) => s.currentTaskIndex);
+  const missionPhase = useGameStore((s) => s.missionPhase);
+  const lastQueryResult = useGameStore((s) => s.lastQueryResult);
+  const setLastQueryResult = useGameStore((s) => s.setLastQueryResult);
+  const pushSqlHistory = useGameStore((s) => s.pushSqlHistory);
+  const completeCurrentTask = useGameStore((s) => s.completeCurrentTask);
+  const goToNextTask = useGameStore((s) => s.goToNextTask);
+  const finishMission = useGameStore((s) => s.finishMission);
+  const goToScreen = useGameStore((s) => s.goToScreen);
+  const setMissionPhase = useGameStore((s) => s.setMissionPhase);
+  const recordWrongAttempt = useGameStore((s) => s.recordWrongAttempt);
+  const lastXpBreakdown = useGameStore((s) => s.lastXpBreakdown);
+
+  const mission = getMissionById(currentMissionId);
+  const task = mission.tasks[currentTaskIndex];
+
+  // Case-closed summary: the actual clauses this case taught, and what's next.
+  const skillsUsed = Array.from(new Set(mission.tasks.map((t) => t.concept))).join(" · ");
+  const nextMission = MISSIONS[MISSIONS.findIndex((m) => m.id === mission.id) + 1];
+
+  const dbStatus = useDbStatus();
+
+  // Get available columns for the current task
+  const availableSchemas = TABLE_SCHEMAS.filter(
+    (schema) =>
+      schema.missionId === currentMissionId &&
+      schema.taskIndex !== undefined &&
+      schema.taskIndex <= currentTaskIndex
+  );
+  const availableColumns = Array.from(
+    new Set(availableSchemas.flatMap((schema) => schema.columns.map((col) => col.name)))
+  );
+
+  // Boot the in-browser database as soon as the mission layout mounts so the
+  // WASM download and seeding happen before the player's first query.
+  useEffect(() => {
+    warmDb();
+  }, []);
+
+  // Move focus to the heading of each newly rendered screen so keyboard and
+  // screen-reader users land on the new context. task-active <-> task-review
+  // swap within the same layout, so focus stays where the player left it.
+  const headingRef = useRef<HTMLElement | null>(null);
+  const setHeadingRef = (el: HTMLElement | null) => {
+    headingRef.current = el;
+  };
+  const prevPhaseRef = useRef(missionPhase);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = missionPhase;
+    if (prev === missionPhase) return;
+    const sameLayout = ["task-active", "task-review"];
+    if (sameLayout.includes(prev) && sameLayout.includes(missionPhase)) return;
+    headingRef.current?.focus();
+  }, [missionPhase]);
+
+  const resultInsight =
+    lastQueryResult && !lastQueryResult.error && task?.resultInsight
+      ? task.resultInsight(lastQueryResult)
+      : null;
+
+  const unlockedClue = task?.clueId ? CLUE_CATALOG[task.clueId] : undefined;
+
+  const stepKey = `${currentTaskIndex}::${missionPhase}`;
+
+  // Keyed on the task alone (not the phase) — the editor and any validation
+  // message should only reset when a genuinely new task begins, not when
+  // moving from task-active into task-review for the same query.
+  const taskKey = String(currentTaskIndex);
+  const [sqlValue, setSqlValue] = useKeyedState(taskKey, () => task?.starterSql ?? "");
+  const [validationMessage, setValidationMessage] = useKeyedState<string | null>(
+    taskKey,
+    () => null
+  );
+  const [running, setRunning] = useState(false);
+
+  // Picked once per task-success entry so Marlowe opens with a fresh reaction
+  // instead of jumping straight into the case-specific line. The keyed init
+  // runs on every phase change but only draws a line when entering the phase
+  // that shows it; the no-repeat memory lives in dialogue.ts.
+  const [successFiller] = useKeyedState(stepKey, () =>
+    missionPhase === "task-success" ? nextFillerLine() : ""
+  );
+
+  // Picked once per task-review entry — Marlowe only occasionally chimes in
+  // while the player is looking over the evidence, so this can be null.
+  const [reviewLine] = useKeyedState<string | null>(stepKey, () =>
+    missionPhase === "task-review" ? nextReflectionLine() : null
+  );
+
+  async function handleRun() {
+    playSound("queryRun");
+    setRunning(true);
+    setValidationMessage(null);
+    const result = await runQuery(sqlValue);
+    setLastQueryResult(result);
+    pushSqlHistory(sqlValue);
+    setRunning(false);
+
+    if (missionPhase === "task-active" && task) {
+      const verdict = task.validate(sqlValue, result);
+      if (verdict.success) {
+        playSound("success");
+        // Don't auto-complete — let the player review the evidence first.
+        // completeCurrentTask() only fires once they click "Continue Investigation".
+        setMissionPhase("task-review");
+      } else {
+        playSound("error");
+        setValidationMessage(verdict.message ?? "Not quite — try again.");
+        recordWrongAttempt(task.id);
+      }
+    }
+  }
+
+  function handleContinueInvestigation() {
+    playSound("click");
+    completeCurrentTask();
+  }
+
+  if (!task && missionPhase !== "debrief" && missionPhase !== "complete") {
+    return null;
+  }
+
+  if (missionPhase === "briefing") {
+    return (
+      <CenteredDialogueScreen caseLabel={mission.caseNumber} headingRef={setHeadingRef}>
+        <ChiefDialogue
+          lines={mission.briefing}
+          onComplete={() => setMissionPhase("task-intro")}
+          continueLabel="Take the case"
+        />
+      </CenteredDialogueScreen>
+    );
+  }
+
+  if (missionPhase === "task-intro") {
+    return (
+      <CenteredDialogueScreen caseLabel={mission.caseNumber} headingRef={setHeadingRef}>
+        <ChiefDialogue
+          lines={task.chiefIntro}
+          onComplete={() => setMissionPhase("task-active")}
+          continueLabel="Open the terminal"
+        />
+      </CenteredDialogueScreen>
+    );
+  }
+
+  if (missionPhase === "task-success") {
+    return (
+      <CenteredDialogueScreen caseLabel={mission.caseNumber} headingRef={setHeadingRef}>
+        <ChiefDialogue
+          lines={[
+            successFiller,
+            ...task.successDialogue,
+            ...(unlockedClue
+              ? [`"Good work. You've unlocked the ${unlockedClue.title}. ${unlockedClue.revealHook}"`]
+              : []),
+          ]}
+          onComplete={() => goToNextTask()}
+          continueLabel={currentTaskIndex + 1 >= mission.tasks.length ? "Wrap up the case" : "Next lead"}
+        />
+        {lastXpBreakdown && (
+          <div className="noir-panel mt-4 rounded-lg p-3 text-sm">
+            <p className="mb-1 font-noir text-xs uppercase tracking-widest text-accent">Mission XP</p>
+            <p className="text-foreground/70">{lastXpBreakdown.base} Base</p>
+            {lastXpBreakdown.adjustments.map((adj) => (
+              <p key={adj.label} className={adj.amount >= 0 ? "text-accent-soft" : "text-danger"}>
+                {adj.amount >= 0 ? `+${adj.amount}` : adj.amount} {adj.label}
+              </p>
+            ))}
+            <p className="mt-1 font-noir text-accent-soft">= {lastXpBreakdown.total} XP</p>
+          </div>
+        )}
+      </CenteredDialogueScreen>
+    );
+  }
+
+  if (missionPhase === "debrief") {
+    return (
+      <CenteredDialogueScreen caseLabel={mission.caseNumber} headingRef={setHeadingRef}>
+        <ChiefDialogue
+          lines={mission.debrief}
+          onComplete={() => finishMission()}
+          continueLabel="Close the case"
+        />
+      </CenteredDialogueScreen>
+    );
+  }
+
+  if (missionPhase === "complete") {
+    return (
+      <div className="film-grain flex min-h-screen flex-col items-center justify-center gap-6 bg-[#05070d] px-6 text-center">
+        <p className="font-noir text-xs uppercase tracking-[0.3em] text-accent-soft/60">
+          {mission.caseNumber} — Closed
+        </p>
+        <h1
+          ref={setHeadingRef}
+          tabIndex={-1}
+          className="font-noir text-4xl text-accent-soft outline-none sm:text-5xl"
+        >
+          Case Closed 🎧
+        </h1>
+        <p className="font-noir text-lg text-accent-soft/80">{mission.title}</p>
+        <p className="max-w-md text-foreground/60">Report filed with Chief Reyes.</p>
+        <div className="mt-4 w-full max-w-sm">
+          <XPBar />
+        </div>
+        <p className="text-xs uppercase tracking-widest text-foreground/40">
+          Skills used: {skillsUsed}
+        </p>
+        <BadgeCase />
+        <div className="w-full max-w-sm text-left">
+          <InvestigationBoard />
+        </div>
+        <p className="text-xs uppercase tracking-widest text-foreground/30">
+          {nextMission ? `Next Case: ${nextMission.title}` : "All cases closed."}
+        </p>
+        <button
+          onClick={() => goToScreen("office")}
+          className="mt-2 rounded-md border-2 border-accent bg-accent/10 px-6 py-3 font-noir text-accent-soft transition hover:bg-accent/20"
+        >
+          Return to the office
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen w-full flex-col gap-4 bg-[#05070d] p-4 sm:p-6">
+      <header className="noir-panel flex flex-col gap-3 rounded-lg p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-noir text-xs uppercase tracking-widest text-foreground/40">
+            {mission.caseNumber}
+          </p>
+          <h1 ref={setHeadingRef} tabIndex={-1} className="font-noir text-lg text-accent-soft outline-none">
+            {mission.title}
+          </h1>
+        </div>
+        <div className="flex flex-1 items-center gap-4 sm:max-w-md">
+          <XPBar />
+          <SoundToggle />
+        </div>
+      </header>
+
+      <div className="noir-panel rounded-lg p-3 mb-1">
+        <ProgressBar
+          currentStep={
+            currentTaskIndex + (missionPhase === "task-active" || missionPhase === "task-review" ? 0 : 1)
+          }
+          totalSteps={mission.tasks.length}
+          label="Investigation Progress"
+        />
+      </div>
+
+      <CurrentMissionCard task={task} onInsertAnswer={setSqlValue} />
+
+      <div className="flex flex-col gap-4">
+        {dbStatus === "loading" && (
+          <p className="noir-panel rounded-md px-3 py-2 text-sm text-accent-soft/80">
+            <span className="mr-2 inline-block animate-pulse text-accent">●</span>
+            Booting the label's database…
+          </p>
+        )}
+        {dbStatus === "failed" && (
+          <p className="noir-panel flex items-center justify-between rounded-md px-3 py-2 text-sm text-danger">
+            The label's database is offline.
+            <button
+              onClick={() => warmDb()}
+              className="ml-3 rounded border border-accent-soft/40 px-3 py-1 text-xs text-accent-soft transition hover:bg-accent-soft/10"
+            >
+              Retry ▸
+            </button>
+          </p>
+        )}
+        <SqlEditor value={sqlValue} onChange={setSqlValue} onRun={handleRun} running={running} columns={availableColumns} />
+        {validationMessage && (
+          <motion.p
+            role="alert"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-sm text-danger"
+          >
+            {validationMessage}
+          </motion.p>
+        )}
+        {missionPhase === "task-review" && reviewLine && (
+          <motion.p
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-md border border-accent/40 bg-accent/5 px-3 py-2 text-sm text-accent-soft"
+          >
+            <span className="mr-1 font-noir text-xs uppercase tracking-widest text-accent">
+              Chief Reyes:
+            </span>
+            {reviewLine}
+          </motion.p>
+        )}
+        <ResultsGrid result={lastQueryResult} insight={resultInsight} />
+        {missionPhase === "task-review" && task?.chiefReaction && (
+          <ChiefReactionDisplay reactions={task.chiefReaction} />
+        )}
+        {missionPhase === "task-review" && (
+          <motion.button
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            onClick={handleContinueInvestigation}
+            className="self-start rounded-md border-2 border-accent bg-accent/10 px-6 py-3 font-noir text-accent-soft transition hover:bg-accent/20"
+          >
+            Continue Investigation ▸
+          </motion.button>
+        )}
+      </div>
+
+      <WitnessFile />
+
+      <InvestigationBoard />
+
+      <BadgeCase />
+    </div>
+  );
+}
+
+function CenteredDialogueScreen({
+  children,
+  caseLabel,
+  headingRef,
+}: {
+  children: React.ReactNode;
+  caseLabel: string;
+  headingRef?: (el: HTMLElement | null) => void;
+}) {
+  return (
+    <div className="film-grain flex min-h-screen w-full items-center justify-center bg-[#05070d] px-4 py-10">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-2xl"
+      >
+        <p
+          ref={headingRef}
+          tabIndex={-1}
+          className="mb-3 text-center font-noir text-xs uppercase tracking-[0.3em] text-foreground/40 outline-none"
+        >
+          {caseLabel}
+        </p>
+        {children}
+      </motion.div>
+    </div>
+  );
+}
