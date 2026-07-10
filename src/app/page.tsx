@@ -1,10 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function LandingPage() {
   const [emailNote, setEmailNote] = useState("NO SPAM. ONE EMAIL WHEN EPISODE TWO OPENS.");
+  const [isSmallScreen, setIsSmallScreen] = useState(false);
+
+  // Track screen size for responsive button text
+  const handleResize = () => {
+    setIsSmallScreen(window.innerWidth < 460);
+  };
+
+  useEffect(() => {
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const handleEmailSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -17,43 +29,129 @@ export default function LandingPage() {
 
   return (
     <div style={styles.root}>
+      <style>{`
+        /* Ensure no horizontal overflow */
+        * {
+          box-sizing: border-box;
+        }
+        body {
+          overflow-x: hidden;
+        }
+
+        /* Mobile: hide tabs, reduce nav padding */
+        @media (max-width: 759px) {
+          .landing-tabs {
+            display: none !important;
+          }
+          .landing-nav-inner {
+            padding: 12px 16px !important;
+            gap: 12px;
+          }
+          .landing-nav-btn {
+            padding: 10px 14px !important;
+            font-size: 0.8rem !important;
+            white-space: nowrap;
+          }
+        }
+
+        /* Very small screens: reduce button padding more */
+        @media (max-width: 460px) {
+          .landing-nav-btn {
+            padding: 8px 12px !important;
+            font-size: 0.75rem !important;
+          }
+        }
+
+        /* Small screens: optimize wrap padding */
+        @media (max-width: 640px) {
+          .landing-wrap {
+            padding: 0 16px !important;
+          }
+        }
+
+        /* Hero section mobile: reduce padding and spacing */
+        @media (max-width: 520px) {
+          .landing-hero {
+            padding: 32px 0 48px !important;
+          }
+          .landing-case-card {
+            padding: 20px 16px !important;
+          }
+          .landing-case-meta {
+            gap: 12px !important;
+            margin-bottom: 14px !important;
+            padding-bottom: 10px !important;
+          }
+          .landing-h1 {
+            font-size: 1.6rem !important;
+            margin: 12px 0 8px !important;
+          }
+          .landing-hero-sub {
+            font-size: 0.95rem !important;
+            margin-bottom: 16px !important;
+          }
+          .landing-cta-row {
+            gap: 8px !important;
+          }
+          .landing-fine-print {
+            margin-top: 12px !important;
+            font-size: 0.65rem !important;
+          }
+        }
+
+        @media (max-width: 375px) {
+          .landing-wrap {
+            padding: 0 12px !important;
+          }
+          .landing-case-card {
+            padding: 16px 12px !important;
+          }
+          .landing-h1 {
+            font-size: 1.4rem !important;
+          }
+          .landing-hero-sub {
+            font-size: 0.9rem !important;
+          }
+        }
+      `}</style>
       {/* Navigation */}
       <header style={styles.nav}>
-        <div style={styles.navInner}>
+        <div style={styles.navInner} className="landing-nav-inner">
           <div style={styles.wordmark}>
             Halcyon Records <span style={{ color: "var(--accent)" }}>· Data Integrity</span>
           </div>
-          <ul style={styles.tabs}>
+          <ul style={styles.tabs} className="landing-tabs">
             <li><a href="#brief" style={styles.tabLink}>Case Brief</a></li>
             <li><a href="#method" style={styles.tabLink}>Method</a></li>
             <li><a href="#dossier" style={styles.tabLink}>Dossier</a></li>
             <li><a href="#faq" style={styles.tabLink}>FAQ</a></li>
           </ul>
-          <Link href="/game" style={styles.btnPrimary}>
-            Start the Investigation
+          <Link href="/game" style={{ ...styles.btnPrimary, ...styles.navBtn }} className="landing-nav-btn">
+            <span style={{ display: isSmallScreen ? "none" : "inline" }}>Start the Investigation</span>
+            <span style={{ display: isSmallScreen ? "inline" : "none" }}>Play</span>
           </Link>
         </div>
       </header>
 
       {/* Hero Section */}
-      <section style={styles.hero} id="brief">
-        <div style={styles.wrap}>
+      <section style={styles.hero} id="brief" className="landing-hero">
+        <div style={styles.wrap} className="landing-wrap">
           <div style={styles.heroGrid}>
             {/* Case Card */}
-            <div style={styles.caseCard}>
-              <div style={styles.caseMeta}>
+            <div style={styles.caseCard} className="landing-case-card">
+              <div style={styles.caseMeta} className="landing-case-meta">
                 <span><strong>Case</strong> No. 001</span>
                 <span><strong>Assigned to</strong> You</span>
                 <span><strong>Division</strong> Data Integrity</span>
               </div>
-              <span style={styles.eyebrow}>The A&R Files</span>
-              <h1 style={styles.h1}>
+              <span style={styles.eyebrow} className="landing-eyebrow">The A&R Files</span>
+              <h1 style={styles.h1} className="landing-h1">
                 Halcyon Records has a data integrity problem. You're the analyst who solves it.
               </h1>
-              <p style={styles.heroSub}>
+              <p style={styles.heroSub} className="landing-hero-sub">
                 Open the file. Every clue is a query. Four investigations — streaming fraud, missing credits, chart manipulation, royalty theft — solved with real SQL, right in your browser.
               </p>
-              <div style={styles.heroCtaRow}>
+              <div style={styles.heroCtaRow} className="landing-cta-row">
                 <Link href="/game" style={styles.btnPrimary}>
                   Start the Investigation
                 </Link>
@@ -61,7 +159,7 @@ export default function LandingPage() {
                   See how it works
                 </a>
               </div>
-              <div style={styles.finePrint}>
+              <div style={styles.finePrint} className="landing-fine-print">
                 FREE TO PLAY · NO INSTALL · RUNS ENTIRELY IN YOUR BROWSER
               </div>
             </div>
@@ -343,9 +441,11 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "16px 24px",
+    padding: "12px 16px",
     maxWidth: "1120px",
     margin: "0 auto",
+    gap: "12px",
+    flexWrap: "nowrap",
   },
   wordmark: {
     fontFamily: "var(--font-detective)",
@@ -389,6 +489,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: "inline-block",
     textDecoration: "none",
   },
+  navBtn: {
+    padding: "10px 16px",
+    fontSize: "0.85rem",
+  },
   btnGhost: {
     background: "transparent",
     color: "var(--foreground)",
@@ -404,12 +508,12 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: "none",
   },
   hero: {
-    padding: "64px 0 88px",
+    padding: "40px 0 56px",
   },
   wrap: {
     maxWidth: "1120px",
     margin: "0 auto",
-    padding: "0 24px",
+    padding: "0 16px",
   },
   heroGrid: {
     display: "grid",
@@ -420,7 +524,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "var(--panel)",
     border: "1px solid var(--panel-border)",
     borderRadius: "4px",
-    padding: "36px 32px",
+    padding: "24px 20px",
     position: "relative",
   },
   caseMeta: {
