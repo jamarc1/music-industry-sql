@@ -42,6 +42,7 @@ interface GameState {
   sqlHistory: string[];
   soundMuted: boolean;
   selectedTable: string | null;
+  emailCaptureShown: boolean;
 
   goToScreen: (screen: Screen) => void;
   startMission: (missionId: string) => void;
@@ -62,6 +63,7 @@ interface GameState {
   pushSqlHistory: (sql: string) => void;
   toggleSound: () => void;
   setSelectedTable: (name: string | null) => void;
+  markEmailCaptureShown: () => void;
 }
 
 // Per-task scoring follows the design doc: full XP for a clean (hint-free)
@@ -85,6 +87,7 @@ interface PersistedGameState {
   soundMuted: boolean;
   screen: Screen;
   missionPhase: MissionPhase;
+  emailCaptureShown: boolean;
 }
 
 export const XP_PER_LEVEL = 150;
@@ -128,6 +131,7 @@ export const useGameStore = create<GameState>()(
   sqlHistory: [],
   soundMuted: false,
   selectedTable: null,
+  emailCaptureShown: false,
 
   goToScreen: (screen) => set({ screen }),
 
@@ -266,6 +270,8 @@ export const useGameStore = create<GameState>()(
   toggleSound: () => set((state) => ({ soundMuted: !state.soundMuted })),
 
   setSelectedTable: (name) => set({ selectedTable: name }),
+
+  markEmailCaptureShown: () => set({ emailCaptureShown: true }),
     }),
     {
       name: "ar-files-save-v1",
@@ -285,6 +291,7 @@ export const useGameStore = create<GameState>()(
         soundMuted: state.soundMuted,
         screen: state.screen,
         missionPhase: state.missionPhase,
+        emailCaptureShown: state.emailCaptureShown,
       }),
       merge: (persistedState, currentState) => {
         // No save data at all (first-ever visit) — keep the real defaults

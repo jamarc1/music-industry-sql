@@ -23,6 +23,7 @@ import BadgeCase from "./BadgeCase";
 import InvestigationBoard from "./InvestigationBoard";
 import SoundToggle from "./SoundToggle";
 import HelpModal from "./HelpModal";
+import EmailCaptureModal from "./EmailCaptureModal";
 
 export default function GameShell() {
   const currentMissionId = useGameStore((s) => s.currentMissionId);
@@ -38,6 +39,8 @@ export default function GameShell() {
   const setMissionPhase = useGameStore((s) => s.setMissionPhase);
   const recordWrongAttempt = useGameStore((s) => s.recordWrongAttempt);
   const lastXpBreakdown = useGameStore((s) => s.lastXpBreakdown);
+  const emailCaptureShown = useGameStore((s) => s.emailCaptureShown);
+  const markEmailCaptureShown = useGameStore((s) => s.markEmailCaptureShown);
 
   const mission = getMissionById(currentMissionId);
   const task = mission.tasks[currentTaskIndex];
@@ -102,6 +105,16 @@ export default function GameShell() {
   );
   const [running, setRunning] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isEmailCaptureOpen, setIsEmailCaptureOpen] = useState(false);
+
+  // Show email capture prompt after completing Case 1
+  useEffect(() => {
+    const isCase1Complete = missionPhase === "complete" && MISSIONS[0].id === currentMissionId;
+    if (isCase1Complete && !emailCaptureShown) {
+      setIsEmailCaptureOpen(true);
+      markEmailCaptureShown();
+    }
+  }, [missionPhase, currentMissionId, emailCaptureShown, markEmailCaptureShown]);
 
   // Picked once per task-success entry so Marlowe opens with a fresh reaction
   // instead of jumping straight into the case-specific line. The keyed init
@@ -250,6 +263,14 @@ export default function GameShell() {
         >
           Return to the office
         </button>
+
+        <EmailCaptureModal
+          isOpen={isEmailCaptureOpen}
+          onClose={() => setIsEmailCaptureOpen(false)}
+          onSubmit={(email) => {
+            console.log("[EmailCapture] Email submitted:", email);
+          }}
+        />
       </div>
     );
   }
@@ -347,6 +368,14 @@ export default function GameShell() {
       <BadgeCase />
 
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+
+      <EmailCaptureModal
+        isOpen={isEmailCaptureOpen}
+        onClose={() => setIsEmailCaptureOpen(false)}
+        onSubmit={(email) => {
+          console.log("[EmailCapture] Email submitted:", email);
+        }}
+      />
     </div>
   );
 }
