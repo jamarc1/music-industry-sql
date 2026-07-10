@@ -22,6 +22,7 @@ import ProgressBar from "./ProgressBar";
 import BadgeCase from "./BadgeCase";
 import InvestigationBoard from "./InvestigationBoard";
 import SoundToggle from "./SoundToggle";
+import HelpModal from "./HelpModal";
 
 export default function GameShell() {
   const currentMissionId = useGameStore((s) => s.currentMissionId);
@@ -100,6 +101,7 @@ export default function GameShell() {
     () => null
   );
   const [running, setRunning] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Picked once per task-success entry so Marlowe opens with a fresh reaction
   // instead of jumping straight into the case-specific line. The keyed init
@@ -343,6 +345,8 @@ export default function GameShell() {
       <InvestigationBoard />
 
       <BadgeCase />
+
+      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
     </div>
   );
 }
